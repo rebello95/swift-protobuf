@@ -228,19 +228,23 @@ struct GeneratorPlugin {
 
     var errorString: String? = nil
     var responseFiles: [Google_Protobuf_Compiler_CodeGeneratorResponse.File] = []
+    let configurations: [ModelConfiguration] = [.protobuf, .abstraction]
     for name in request.fileToGenerate {
-      let fileDescriptor = descriptorSet.lookupFileDescriptor(protoName: name)
-      let fileGenerator = FileGenerator(fileDescriptor: fileDescriptor, generatorOptions: options)
-      var printer = CodePrinter()
-      fileGenerator.generateOutputFile(printer: &printer, errorString: &errorString)
-      if let errorString = errorString {
-        // If generating multiple files, scope the message with the file that triggered it.
-        let fullError = request.fileToGenerate.count > 1 ? "\(name): \(errorString)" : errorString
-        return Google_Protobuf_Compiler_CodeGeneratorResponse(error: fullError)
+      for configuration in configurations {
+        let fileDescriptor = descriptorSet.lookupFileDescriptor(protoName: name)
+        let fileGenerator = FileGenerator(fileDescriptor: fileDescriptor, generatorOptions: options, configuration: configuration)
+
+        var printer = CodePrinter()
+        fileGenerator.generateOutputFile(printer: &printer, errorString: &errorString)
+        if let errorString = errorString {
+          // If generating multiple files, scope the message with the file that triggered it.
+          let fullError = request.fileToGenerate.count > 1 ? "\(name): \(errorString)" : errorString
+          return Google_Protobuf_Compiler_CodeGeneratorResponse(error: fullError)
+        }
+        responseFiles.append(
+          Google_Protobuf_Compiler_CodeGeneratorResponse.File(name: fileGenerator.outputFilename,
+                                                              content: printer.content))
       }
-      responseFiles.append(
-        Google_Protobuf_Compiler_CodeGeneratorResponse.File(name: fileGenerator.outputFilename,
-                                                            content: printer.content))
     }
     return Google_Protobuf_Compiler_CodeGeneratorResponse(files: responseFiles)
   }

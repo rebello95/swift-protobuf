@@ -22,16 +22,16 @@ class MessageFieldGenerator: FieldGeneratorBase, FieldGenerator {
     private let usesHeapStorage: Bool
 
     private let hasFieldPresence: Bool
-    private let swiftName: String
     private let underscoreSwiftName: String
     private let storedProperty: String
     private let swiftHasName: String
     private let swiftClearName: String
-    private let swiftType: String
     private let swiftStorageType: String
     private let swiftDefaultValue: String
     private let traitsType: String
     private let comments: String
+    private let configuration: ModelConfiguration
+    private let postfixedSwiftType: String
 
     private var isMap: Bool {return fieldDescriptor.isMap}
     private var isPacked: Bool { return fieldDescriptor.isPacked }
@@ -47,15 +47,23 @@ class MessageFieldGenerator: FieldGeneratorBase, FieldGenerator {
       }
     }
 
+    let swiftName: String
+    let swiftType: String
+    let swiftMapValueType: String?
+    let typeDetails: (isCustom: Bool, isMap: Bool)
+
     init(descriptor: FieldDescriptor,
          generatorOptions: GeneratorOptions,
          namer: SwiftProtobufNamer,
-         usesHeapStorage: Bool)
+         usesHeapStorage: Bool,
+         configuration: ModelConfiguration = .protobuf)
     {
         precondition(descriptor.oneofIndex == nil)
 
         self.generatorOptions = generatorOptions
         self.usesHeapStorage = usesHeapStorage
+        self.configuration = configuration
+        self.typeDetails = (descriptor.isCustomType, descriptor.isMap)
 
         hasFieldPresence = descriptor.hasFieldPresence
         let names = namer.messagePropertyNames(field: descriptor,
@@ -66,10 +74,17 @@ class MessageFieldGenerator: FieldGeneratorBase, FieldGenerator {
         swiftHasName = names.has
         swiftClearName = names.clear
         swiftType = descriptor.swiftType(namer: namer)
+        postfixedSwiftType = descriptor.swiftType(namer: namer, messagePostfix: configuration.postfix)
         swiftStorageType = descriptor.swiftStorageType(namer: namer)
         swiftDefaultValue = descriptor.swiftDefaultValue(namer: namer)
         traitsType = descriptor.traitsType(namer: namer)
         comments = descriptor.protoSourceComments()
+
+        if descriptor.isMap {
+            swiftMapValueType = descriptor.messageType.fields[1].swiftType(namer: namer, messagePostfix: configuration.postfix)
+        } else {
+            swiftMapValueType = nil
+        }
 
         if usesHeapStorage {
             storedProperty = "_storage.\(underscoreSwiftName)"
@@ -93,6 +108,12 @@ class MessageFieldGenerator: FieldGeneratorBase, FieldGenerator {
     }
 
     func generateInterface(printer p: inout CodePrinter) {
+        if self.configuration == .abstraction {
+            p.print(self.comments)
+            p.print("public let \(self.swiftName): \(self.postfixedSwiftType)\n")
+            return
+        }
+
         let visibility = generatorOptions.visibilitySourceSnippet
 
         p.print("\n", comments)

@@ -119,13 +119,18 @@ extension FieldDescriptor {
     }
   }
 
-  func swiftType(namer: SwiftProtobufNamer) -> String {
+  /// Whether this is a custom type (another message, enum, etc.).
+  var isCustomType: Bool {
+    return [.group, .message, .enum].contains(self.type)
+  }
+
+  func swiftType(namer: SwiftProtobufNamer, messagePostfix: String = "") -> String {
     if isMap {
       let mapDescriptor: Descriptor = messageType
       let keyField = mapDescriptor.fields[0]
-      let keyType = keyField.swiftType(namer: namer)
+      let keyType = keyField.swiftType(namer: namer, messagePostfix: messagePostfix)
       let valueField = mapDescriptor.fields[1]
-      let valueType = valueField.swiftType(namer: namer)
+      let valueType = valueField.swiftType(namer: namer, messagePostfix: messagePostfix)
       return "Dictionary<" + keyType + "," + valueType + ">"
     }
 
@@ -140,11 +145,11 @@ extension FieldDescriptor {
     case .fixed32: result = "UInt32"
     case .bool: result = "Bool"
     case .string: result = "String"
-    case .group: result = namer.fullName(message: messageType)
-    case .message: result = namer.fullName(message: messageType)
+    case .group: result = namer.fullName(message: messageType) + messagePostfix
+    case .message: result = namer.fullName(message: messageType) + messagePostfix
     case .bytes: result = "Data"
     case .uint32: result = "UInt32"
-    case .enum: result = namer.fullName(enum: enumType)
+    case .enum: result = namer.fullName(enum: enumType) + messagePostfix
     case .sfixed32: result = "Int32"
     case .sfixed64: result = "Int64"
     case .sint32: result = "Int32"

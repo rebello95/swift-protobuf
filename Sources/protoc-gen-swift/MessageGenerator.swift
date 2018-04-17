@@ -32,16 +32,19 @@ class MessageGenerator {
   private let enums: [EnumGenerator]
   private let messages: [MessageGenerator]
   private let isExtensible: Bool
+  private let configuration: ModelConfiguration
 
   init(
     descriptor: Descriptor,
     generatorOptions: GeneratorOptions,
     namer: SwiftProtobufNamer,
-    extensionSet: ExtensionSetGenerator
+    extensionSet: ExtensionSetGenerator,
+    configuration: ModelConfiguration = .protobuf
   ) {
     self.descriptor = descriptor
     self.generatorOptions = generatorOptions
     self.namer = namer
+    self.configuration = configuration
 
     visibility = generatorOptions.visibilitySourceSnippet
     isExtensible = !descriptor.extensionRanges.isEmpty
@@ -62,7 +65,8 @@ class MessageGenerator {
     let factory = MessageFieldFactory(generatorOptions: generatorOptions,
                                       namer: namer,
                                       useHeapStorage: useHeapStorage,
-                                      oneofGenerators: oneofs)
+                                      oneofGenerators: oneofs,
+                                      configuration: configuration)
     fields = descriptor.fields.map {
       return factory.make(forFieldDescriptor: $0)
     }
@@ -71,14 +75,15 @@ class MessageGenerator {
     extensionSet.add(extensionFields: descriptor.extensions)
 
     enums = descriptor.enums.map {
-      return EnumGenerator(descriptor: $0, generatorOptions: generatorOptions, namer: namer)
+      return EnumGenerator(descriptor: $0, generatorOptions: generatorOptions, namer: namer, configuration: configuration)
     }
 
     messages = descriptor.messages.filter { return !$0.isMapEntry }.map {
       return MessageGenerator(descriptor: $0,
                               generatorOptions: generatorOptions,
                               namer: namer,
-                              extensionSet: extensionSet)
+                              extensionSet: extensionSet,
+                              configuration: configuration)
     }
 
     if isAnyMessage {
@@ -117,27 +122,28 @@ class MessageGenerator {
     }
 
     let conformances: String
-    if isExtensible {
+    if isExtensible && self.configuration == .protobuf {
       conformances = ": SwiftProtobuf.ExtensibleMessage"
     } else {
       conformances = ""
     }
+
+    let structVisibility = self.configuration == .protobuf ? visibility : "public "
     p.print(
         "\n",
         descriptor.protoSourceComments(),
-        "\(visibility)struct \(swiftRelativeName)\(conformances) {\n")
+        "\(structVisibility)struct \(swiftRelativeName)\(self.configuration.postfix)\(conformances) {\n")
     p.indent()
-    p.print("// SwiftProtobuf.Message conformance is added in an extension below. See the\n",
-            "// `Message` and `Message+*Additions` files in the SwiftProtobuf library for\n",
-            "// methods supported on all messages.\n")
 
     for f in fields {
       f.generateInterface(printer: &p)
     }
 
-    p.print(
+    if self.configuration == .protobuf {
+      p.print(
         "\n",
         "\(visibility)var unknownFields = SwiftProtobuf.UnknownStorage()\n")
+    }
 
     for o in oneofs {
       o.generateMainEnum(printer: &p)
@@ -153,35 +159,11 @@ class MessageGenerator {
       m.generateMainStruct(printer: &p, parent: self, errorString: &errorString)
     }
 
-    // Generate the default initializer. If we don't, Swift seems to sometimes
-    // generate it along with others that can take public proprerties. When it
-    // generates the others doesn't seem to be documented.
-    p.print(
-        "\n",
-        "\(visibility)init() {}\n")
-
-    // Optional extension support
-    if isExtensible {
-      p.print(
-          "\n",
-          "\(visibility)var _protobuf_extensionFieldValues = SwiftProtobuf.ExtensionFieldValueSet()\n")
-    }
-    if let storage = storage {
-      if !isExtensible {
-        p.print("\n")
-      }
-      p.print("\(storage.storageVisibility) var _storage = _StorageClass.defaultInstance\n")
-    } else {
-      var subMessagePrinter = CodePrinter()
-      for f in fields {
-        f.generateStorage(printer: &subMessagePrinter)
-      }
-      if !subMessagePrinter.isEmpty {
-        if !isExtensible {
-          p.print("\n")
-        }
-        p.print(subMessagePrinter.content)
-      }
+    switch self.configuration {
+    case .protobuf:
+      self.printProtobufInitializerAndSubCode(using: &p)
+    case .abstraction:
+      self.printAbstractionForMessages(using: &p)
     }
 
     p.outdent()
@@ -226,6 +208,92 @@ class MessageGenerator {
     for m in messages {
       m.generateRuntimeSupport(printer: &p, file: file, parent: self)
     }
+  }
+
+  private func printProtobufInitializerAndSubCode(using p: inout CodePrinter) {
+    // Generate the default initializer. If we don't, Swift seems to sometimes
+    // generate it along with others that can take public proprerties. When it
+    // generates the others doesn't seem to be documented.
+    p.print(
+      "\n",
+      "\(visibility)init() {}\n")
+
+    // Optional extension support
+    if isExtensible {
+      p.print(
+        "\n",
+        "\(visibility)var _protobuf_extensionFieldValues = SwiftProtobuf.ExtensionFieldValueSet()\n")
+    }
+    if let storage = storage {
+      if !isExtensible {
+        p.print("\n")
+      }
+      p.print("\(storage.storageVisibility) var _storage = _StorageClass.defaultInstance\n")
+    } else {
+      var subMessagePrinter = CodePrinter()
+      for f in fields {
+        f.generateStorage(printer: &subMessagePrinter)
+      }
+      if !subMessagePrinter.isEmpty {
+        if !isExtensible {
+          p.print("\n")
+        }
+        p.print(subMessagePrinter.content)
+      }
+    }
+  }
+
+  private func printAbstractionForMessages(using p: inout CodePrinter) {
+    // Generate function to convert protobuf -> abstraction.
+    p.print(
+        "\n",
+        "/// Returns a \(self.configuration.postfix) representation for the provided protobuf.\n",
+        "static func from(_ proto: \(swiftRelativeName)) -> \(swiftRelativeName)\(self.configuration.postfix) {\n")
+    p.indent()
+    p.print("return \(swiftRelativeName)\(self.configuration.postfix)(")
+    let modelFieldStrings = fields.map { field in
+        let value: String
+        if field.typeDetails.isMap, let baseValueType = field.swiftMapValueType {
+            value = "proto.\(field.swiftName).mapValues { \(baseValueType).from($0) }"
+        } else if field.typeDetails.isCustom {
+            value = "\(field.swiftType)\(self.configuration.postfix).from(proto.\(field.swiftName))"
+        } else {
+            value = "proto.\(field.swiftName)"
+        }
+
+        return "\(field.swiftName): \(value)"
+    }.joined(separator: ", ")
+
+    p.print(modelFieldStrings)
+    p.print(")\n")
+
+    p.outdent()
+    p.print("}\n")
+
+    // Generate function to convert abstraction -> protobuf.
+    p.print(
+        "\n",
+        "/// Returns an equivalent protobuf representation for this \(self.configuration.postfix).\n",
+        "func protobuf() -> \(swiftRelativeName) {\n")
+    p.indent()
+    p.print("var model = \(swiftRelativeName)()\n")
+    let protoFieldStrings = fields.map { field in
+        let postfix = field.typeDetails.isCustom ? ".protobuf()" : ""
+        let value: String
+        if field.typeDetails.isMap {
+            value = "\(field.swiftName).mapValues { $0\(postfix) }"
+        } else {
+            value = "\(field.swiftName)\(postfix)"
+        }
+
+        return "model.\(field.swiftName) = self.\(value)"
+    }.joined(separator: "\n")
+
+    p.print(protoFieldStrings)
+    p.print("\n", "return model", "\n")
+
+    p.outdent()
+    p.print("}\n")
   }
 
   private func generateProtoNameProviding(printer p: inout CodePrinter) {
@@ -496,17 +564,20 @@ fileprivate struct MessageFieldFactory {
   private let namer: SwiftProtobufNamer
   private let useHeapStorage: Bool
   private let oneofs: [OneofGenerator]
+  private let configuration: ModelConfiguration
 
   init(
     generatorOptions: GeneratorOptions,
     namer: SwiftProtobufNamer,
     useHeapStorage: Bool,
-    oneofGenerators: [OneofGenerator]
+    oneofGenerators: [OneofGenerator],
+    configuration: ModelConfiguration = .protobuf
   ) {
     self.generatorOptions = generatorOptions
     self.namer = namer
     self.useHeapStorage = useHeapStorage
-    oneofs = oneofGenerators
+    self.oneofs = oneofGenerators
+    self.configuration = configuration
   }
 
   func make(forFieldDescriptor field: FieldDescriptor) -> FieldGenerator {
@@ -516,7 +587,8 @@ fileprivate struct MessageFieldFactory {
       return MessageFieldGenerator(descriptor: field,
                                    generatorOptions: generatorOptions,
                                    namer: namer,
-                                   usesHeapStorage: useHeapStorage)
+                                   usesHeapStorage: useHeapStorage,
+                                   configuration: self.configuration)
     }
   }
 }

@@ -9,6 +9,7 @@ xcbaselines
 /build
 mined_words.txt
 /DescriptorTestData.bin
+/DerivedData
 
 # Intermediate conformance test outputs
 failing_tests.txt

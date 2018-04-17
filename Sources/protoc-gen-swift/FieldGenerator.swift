@@ -22,6 +22,18 @@ import SwiftProtobuf
 protocol FieldGenerator {
   var number: Int { get }
 
+  /// Name of the field in Swift.
+  var swiftName: String { get }
+
+  /// Type of the field in Swift.
+  var swiftType: String { get }
+
+  /// If this field is a map/dictionary, this represents the type of dictionary values.
+  var swiftMapValueType: String? { get }
+
+  /// Whether this is a custom type (message, enum, etc.) or a map.
+  var typeDetails: (isCustom: Bool, isMap: Bool) { get }
+
   /// Name mapping entry for the field.
   var fieldMapNames: String { get }
 

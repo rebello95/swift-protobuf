@@ -24,8 +24,10 @@ class OneofGenerator {
         private(set) var group: Int
 
         let swiftName: String
+        let typeDetails: (isCustom: Bool, isMap: Bool)
         let dottedSwiftName: String
         let swiftType: String
+        let swiftMapValueType: String? = nil
         let swiftDefaultValue: String
         let protoGenericType: String
         let comments: String
@@ -55,6 +57,7 @@ class OneofGenerator {
             swiftName = names.name
             dottedSwiftName = names.prefixed
             swiftType = descriptor.swiftType(namer: namer)
+            typeDetails = (descriptor.isCustomType, descriptor.isMap)
             swiftDefaultValue = descriptor.swiftDefaultValue(namer: namer)
             protoGenericType = descriptor.protoGenericType
             comments = descriptor.protoSourceComments()

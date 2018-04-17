@@ -31,14 +31,17 @@ class EnumGenerator {
 
   private let swiftRelativeName: String
   private let swiftFullName: String
+  private let configuration: ModelConfiguration
 
   init(descriptor: EnumDescriptor,
        generatorOptions: GeneratorOptions,
-       namer: SwiftProtobufNamer
+       namer: SwiftProtobufNamer,
+       configuration: ModelConfiguration = .protobuf
   ) {
     self.enumDescriptor = descriptor
     self.generatorOptions = generatorOptions
     self.namer = namer
+    self.configuration = configuration
 
     mainEnumValueDescriptorsSorted = descriptor.values.filter({
       return $0.aliasOf == nil
@@ -55,12 +58,28 @@ class EnumGenerator {
 
     p.print("\n")
     p.print(enumDescriptor.protoSourceComments())
-    p.print("\(visibility)enum \(swiftRelativeName): SwiftProtobuf.Enum {\n")
-    p.indent()
-    p.print("\(visibility)typealias RawValue = Int\n")
+    switch self.configuration {
+    case .protobuf:
+      p.print("\(visibility)enum \(swiftRelativeName): SwiftProtobuf.Enum {\n")
+      p.indent()
+      p.print("\(visibility)typealias RawValue = Int\n")
+    case .abstraction:
+      p.print("\(visibility)enum \(swiftRelativeName) {\n")
+      p.indent()
+    }
 
     // Cases/aliases
     generateCasesOrAliases(printer: &p)
+
+    defer {
+      p.outdent()
+      p.print("\n")
+      p.print("}\n")
+    }
+
+    if self.configuration == .abstraction {
+      return
+    }
 
     // Generate the default initializer.
     p.print("\n")
@@ -76,15 +95,17 @@ class EnumGenerator {
 
     p.print("\n")
     generateRawValueProperty(printer: &p)
-
-    p.outdent()
-    p.print("\n")
-    p.print("}\n")
   }
 
   func generateRuntimeSupport(printer p: inout CodePrinter) {
     p.print("\n")
-    p.print("extension \(swiftFullName): SwiftProtobuf._ProtoNameProviding {\n")
+    switch self.configuration {
+    case .protobuf:
+      p.print("extension \(swiftFullName): SwiftProtobuf._ProtoNameProviding {\n")
+    case .abstraction:
+      p.print("extension \(swiftFullName) {\n")
+    }
+
     p.indent()
     generateProtoNameProviding(printer: &p)
     p.outdent()
