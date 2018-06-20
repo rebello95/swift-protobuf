@@ -350,14 +350,14 @@ public enum NamingUtils {
           return nil
         }
 
-        if fromChars[fromIndex] == "_" {
-          fromIndex = fromChars.index(after: fromIndex)
-          continue
-        }
-
         if prefixChars[prefixIndex] != fromChars[fromIndex] {
           // They differed before the end of the prefix, can't drop.
           return nil
+        }
+
+        if fromChars[fromIndex] == "_" {
+          fromIndex = fromChars.index(after: fromIndex)
+          continue
         }
 
         prefixIndex = prefixChars.index(after: prefixIndex)
